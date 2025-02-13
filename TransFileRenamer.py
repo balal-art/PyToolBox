@@ -1,76 +1,136 @@
+import pdfplumber
+import pandas as pd
+from arabic_reshaper import reshape
+from bidi.algorithm import get_display
+import re
 import os
 import sys
-import subprocess
-import asyncio
-from googletrans import Translator
-import re
 
-# تابع غیرهمزمان برای ترجمه نام فایل‌ها
-async def translate_file_names(file_info, src_lang, dest_lang):
-    translator = Translator()  # ایجاد یک نمونه از Translator
-    chinese_pattern = re.compile(r'[\u4e00-\u9fff]+')  # الگوی جستجوی کاراکترهای چینی
+# چاپ نسخه کتابخانه pdfplumber
+print(pdfplumber.__version__)
+# ورژن در ویندوز 0.11.5
+#ورژن لینوکس ddddddddddddddd
+# تابعی برای اصلاح متن فارسی که شامل اعداد است
+def _fix_farsi_with_numbers(text):
+    """
+    ابتدا کاراکترهای هر کلمه را برعکس می‌کند، سپس ترتیب کلمات را برعکس می‌کند.
+    اعداد بدون تغییر باقی می‌مانند.
+    """
+    if not isinstance(text, str):
+        return text
     
-    for file, name in file_info.items():
-        print(f'file: {file} // name: {name}')
-        if chinese_pattern.search(name):  # اگر نام فایل شامل کاراکترهای چینی باشد
-            translation_name = await translator.translate(name, src=src_lang, dest=dest_lang)  # ترجمه نام فایل
-            file_info[file] = translation_name.text  # به‌روزرسانی نام فایل
-            print(f'Translating >> {file} ---> {file_info[file]}')
-
-# تابع برای به‌روزرسانی نام فایل‌ها
-def update_filenames(directory, file_info):
-    for file, new_name in file_info.items():
-        old_file_path = os.path.join(directory, file)  # مسیر فایل قدیمی
-        new_file_name = new_name + os.path.splitext(file)[1]  # ساخت نام فایل جدید با پسوند
-        new_file_path = os.path.join(directory, new_file_name)  # مسیر فایل جدید
-        os.rename(old_file_path, new_file_path)  # تغییر نام فایل
-        print(f'{file} --> {new_file_name}')
-
-# تابع برای ذخیره اطلاعات فایل‌ها در فایل متنی
-def save_file_info(file_info, filepath):
-    with open(filepath, 'w', encoding='utf-8') as f:
-        for file, name in file_info.items():
-            f.write(f'{file} --> {name}\n')  # نوشتن نام‌های قدیمی و جدید فایل‌ها در فایل متنی
-    print(f'File info saved to {filepath}')
-    # باز کردن فایل با استفاده از ویرایشگر متن پیش‌فرض سیستم
-    if os.name == 'nt':  # برای ویندوز
-        os.startfile(filepath)
-    elif os.name == 'posix':  # برای macOS و لینوکس
-        subprocess.call(('open', filepath) if sys.platform == 'darwin' else ('xdg-open', filepath))
-
-# تابع برای بارگذاری اطلاعات فایل‌ها از فایل متنی
-def load_file_info(filepath):
-    new_file_info = {}
-    with open(filepath, 'r', encoding='utf-8') as f:
-        for line in f:
-            old_name, new_name = line.strip().split(' --> ')  # جدا کردن نام‌های قدیمی و جدید فایل‌ها
-            new_file_info[old_name] = new_name  # به‌روزرسانی دیکشنری با نام‌های جدید
-    return new_file_info
-
-# تابع اصلی برای تغییر نام فایل‌ها
-def rename_files(directory, src_lang='zh-cn', dest_lang='fa'):
-    file_info = {}
+    # تبدیل چندین فاصله به یک فاصله و حذف فاصله‌های اضافی
+    text = ' '.join(text.split())
     
-    if os.path.isdir(directory):
-        for file in os.listdir(directory):
-            if os.path.isfile(os.path.join(directory, file)):
-                name, ext = os.path.splitext(file)  # جدا کردن نام فایل و پسوند آن
-                file_info[file] = name  # اضافه کردن نام فایل به دیکشنری
-        asyncio.run(translate_file_names(file_info, src_lang, dest_lang))  # اجرای تابع ترجمه به صورت غیرهمزمان
-        
-        txt_filepath = os.path.join(directory, 'file_renames.txt')  # مسیر فایل متنی برای ذخیره نام‌های جدید
-        save_file_info(file_info, txt_filepath)  # ذخیره نام‌های جدید در فایل متنی
-        
-        input("Please review the file_renames.txt file and press Enter to apply the changes...")  # درخواست از کاربر برای بررسی فایل متنی
-        
-        new_file_info = load_file_info(txt_filepath)  # بارگذاری اطلاعات از فایل متنی
-        update_filenames(directory, new_file_info)  # به‌روزرسانی نام فایل‌ها
-    else:
-        print("پوشه‌ای انتخاب نشد.")
+    # تقسیم متن به کلمات
+    words = text.split(' ')
+    # پردازش هر کلمه - برعکس کردن کاراکترها ولی نگه داشتن اعداد به همان صورت
+    fixed_words = []
+    for word in words:
+        # تقسیم کلمه به قسمت‌های عدد و غیر عدد
+        parts = re.findall(r'\d+|[^\d]+', word)
+        fixed_parts = []
+        for part in parts:
+            if part.isdigit():
+                fixed_parts.append(part)  # نگه داشتن اعداد به همان صورت
+            else:
+                fixed_parts.append(part[::-1])  # برعکس کردن کاراکترها در متن
+        fixed_words.append(''.join(fixed_parts))
+    
+    # برعکس کردن ترتیب کلمات
+    fixed_words = fixed_words[::-1]
+    # اتصال کلمات به یکدیگر با استفاده از فاصله‌ها
+    return ' '.join(fixed_words)
 
-# اجرای برنامه به صورت مستقیم
+# تابعی برای تبدیل متن به لیستی از خطوط
+def _text_to_list(text):
+    """
+    تبدیل متن به لیستی از خطوط
+    """
+    if not isinstance(text, str):
+        return []
+
+    # تقسیم متن به خطوط با استفاده از کاراکتر newline
+    lines = text.split('\n')
+    # حذف خطوط خالی
+    lines = [line.strip() for line in lines if line.strip()]
+
+    return lines
+
+def _is_valid_input(page_ranges):
+    import re
+    pattern = r'^(\d+|\d+-\d+)(,(\d+|\d+-\d+))*$'
+    return re.match(pattern, page_ranges) is not None
+
+def _generate_page_list(page_ranges, start,end):
+    if not _is_valid_input(page_ranges):
+        raise ValueError("ورودی نامعتبر است. لطفاً ورودی را بررسی کنید.")
+    pages = set()
+    for part in page_ranges.split(','):
+        if '-' in part:
+            start_range, end_range = map(int, part.split('-'))
+            if start_range < start or end_range > end:
+                raise ValueError(f"محدوده صفحات باید بین {start} و {end} باشد.")
+            pages.update(range(start_range, end_range + 1))
+        else:
+            page = int(part)
+            if page < start or page > end:
+                raise ValueError(f"صفحات باید بین {start} و {end} باشند.")
+            pages.add(page)
+    return sorted(pages)
+
+def pdf2table(pdf_path, save_path, pageList, keyword,fix_farsi=True, debug=False):
+    data = []
+    with pdfplumber.open(pdf_path) as pdf:
+        # شماره صفحات مورد نظر
+        page_list =_generate_page_list(pageList,1,len(pdf.pages))
+        for page in pdf.pages:
+            # بررسی اینکه آیا صفحه در لیست صفحات مورد نظر است
+            if page.page_number in page_list:
+                # چاپ شماره صفحه
+                if debug: print(page.page_number)
+                # استخراج متن صفحه و تبدیل آن به لیستی از خطوط
+                text_lines = _text_to_list(page.extract_text_simple())
+                if debug: print(text_lines)
+                # بررسی وجود کلمه مورد نظر در متن صفحه
+                page_titel = ''
+                for text in text_lines:
+                    if keyword in text:
+                        if fix_farsi: page_titel =_fix_farsi_with_numbers(text)
+                        else: page_titel = text
+                if page_titel:
+                    # استخراج جدول از صفحه
+                    table = page.extract_table()
+                    if table:
+                        if fix_farsi:
+                            # پردازش هر ردیف جدول
+                            for row in table:
+                                re_row = []
+                                for cell in row:
+                                    # اصلاح متن فارسی با اعداد در سلول
+                                    re_cell = _fix_farsi_with_numbers(cell)
+                                    re_row.append(re_cell)
+                                # افزودن ردیف اصلاح‌شده به داده‌ها
+                                data.append(re_row)
+                        else:
+                            data.extend(table)
+                    # چاپ شماره صفحه
+                    print(F'{page.page_number} is ok')
+    
+    # تبدیل داده‌ها به DataFrame و ذخیره به فایل Excel
+    df = pd.DataFrame(data)
+    if debug: print(data)
+    df.to_excel(save_path, index=False, header=False)
+
 if __name__ == '__main__':
-    directory = input("Please enter the directory path: ")  # درخواست مسیر پوشه از کاربر
-    src_lang = input("Please enter the source language (default: 'zh-cn'): ") or 'zh-cn'  # درخواست زبان مبدأ از کاربر
-    dest_lang = input("Please enter the destination language (default: 'fa'): ") or 'fa'  # درخواست زبان مقصد از کاربر
-    rename_files(directory, src_lang, dest_lang)  # اجرای تابع تغییر نام فایل‌ها
+    path = r'C:\Users\Ali\Desktop\Tadil-14031001.pdf'
+    save_path = r'C:\Users\Ali\Desktop\output.xlsx'
+    pageList = "6,5,4"
+    keyword = "ﻪﯾﺎﭘ یﺎﻬﺑ یﺎﻫ ﺖﺳﺮﻬﻓ یا ﻪﺘﺷر"
+    print(keyword)
+    keyword2 = " رشته ای فهرست های بهای پایه"
+    keyword = reshape(keyword2)
+    print(keyword)
+    # print(_fix_farsi_with_numbers(keyword))
+
+    pdf2table(path,save_path,pageList,keyword,fix_farsi=False,debug=False)
